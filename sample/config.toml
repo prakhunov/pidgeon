@@ -1,0 +1,40 @@
+[rabbit]
+    virtualHost = "/"
+    username = "guest"
+    password = "guest"
+
+    # optional
+    connectionName = "cron scheduler"
+
+    exchangeName = "cron.scheduler"
+    # can be repeated if you are connecting to a cluster
+    [[rabbit.servers]]
+    host = "localhost"
+    #port optional defaults to 5672
+    port = 5672
+
+[cron]
+
+    #if forceUniqueTimes is set to true and multiple jobs are assigned to the same time it will throw an error, and exit
+    #if forceUniqueTimes is set to false it will send possibly duplicate messages if the routing keys are the same
+    #defaults to true
+    forceUniqueTimes = true
+    
+    #follows a crontab format the command in this case is the routing key, must be a valid routing key (no spaces)  or will throw an error, and exit
+    schedules = [
+      "0 * * * * * cron.minute.1",
+      "0 */2 * * * * cron.minute.2",                                             
+      "0 */5 * * * * cron.minute.5",                                            
+      "0 */10 * * * * cron.minute.10",
+      "0 */15 * * * * cron.minute.15",                                           
+      "0 */30 * * * * cron.minute.30",                                           
+      "0 */45 * * * * cron.minute.45",                                           
+      "0 0 * * * * cron.hour.1",                                                 
+      "0 0 */2 * * * cron.hour.2",                                               
+      "0 0 */4 * * * cron.hour.4",                                               
+      "0 0 */6 * * * cron.hour.6",                                               
+      "0 0 */8 * * * cron.hour.8",                                               
+      "0 0 */12 * * * cron.hour.12",                                             
+      "0 0 */16 * * * cron.hour.16",                                             
+      "0 0 0 * * * cron.day.1"
+]
