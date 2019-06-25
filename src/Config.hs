@@ -1,16 +1,21 @@
-{-# OPTIONS -Wno-unused-top-binds #-}
 {-# LANGUAGE OverloadedStrings    #-}
 
 module Config
-  ( readConfig
+  ( readConfig,
+    CronConfig (..),
+    RabbitServer (..),
+    RabbitConfig (..),
+    PidgeonConfig (..),
+    ExchangeName
   ) where
 
 import Data.Text (Text)
 import Data.Eq (Eq)
 import Toml (TomlCodec, (.=))
 import Network.Socket (PortNumber)
-
 import qualified Toml
+
+type ExchangeName = Text
 
 data RabbitServer = RabbitServer
   { host :: Text,
@@ -22,7 +27,7 @@ data RabbitConfig = RabbitConfig
     username :: Text,
     password :: Text,
     connectionName :: Maybe Text,
-    exchangeName :: Text,
+    exchangeName :: ExchangeName,
     servers :: [RabbitServer]
   } deriving (Show)
 
@@ -36,8 +41,14 @@ data PidgeonConfig = PidgeonConfig
     cron :: CronConfig
   } deriving (Show)
 
+
+fromIntegralWord16 :: (Integral a, Num b) => a -> b
+fromIntegralWord16 a
+  | a > 65535 || a <= 0 = error "Port Number must be between 1 and 65535"
+  | otherwise = fromIntegral a
+
 portNumberCodec :: TomlCodec PortNumber
-portNumberCodec = Toml.dimap fromIntegral fromIntegral $ Toml.int "port"
+portNumberCodec = Toml.dimap fromIntegralWord16 fromIntegralWord16 $ Toml.int "port"
 
 cronConfigCodec :: TomlCodec CronConfig
 cronConfigCodec = CronConfig

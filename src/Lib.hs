@@ -4,40 +4,77 @@ module Lib
     ( someFunc
     ) where
 
-import Network.AMQP
-import Data.Text
-import Data.String
-import qualified Data.ByteString.Lazy.Char8 as BL
+import qualified Network.AMQP as N
+import Config(PidgeonConfig(..), CronConfig(..), RabbitConfig(..))
+import qualified Config as C
+
+import System.Cron.Schedule
+import Scheduler
+import Control.Concurrent.MVar
+import Rabbit (createConnection, createCronExchange)
+import Control.Concurrent.Event ( Event )
+import Control.Concurrent (forkIO)
+import qualified Control.Concurrent.Event as E
+import System.Environment
 
 
-type ExchangeName = Text
 
-createCronExchange :: Channel -> ExchangeName -> IO ()
-createCronExchange chan cronExchangeName = declareExchange chan $ newExchange {exchangeName = cronExchangeName, exchangeType = "direct"}
-
-
-sendCronMessage :: Channel -> ExchangeName -> Text -> IO (Maybe Int)
-sendCronMessage chan exchangeName cronEvent = publishMsg chan exchangeName cronEvent $ newMsg {msgBody = "test-message"}
+-- TODO instead of passing the mvar'ed connection and event around, use this object and make a reader monad
+data RabbitContext = RabbitContext
+  { connection :: MVar N.Connection,
+    exceptionEvent :: Event
+  }
 
 
-testCallBack :: (Message, Envelope) -> IO ()
-testCallBack (msg, env) = do
-  putStr $ "received a message: " ++ (BL.unpack $ msgBody msg)
-  ackEnv env
+resetConnection :: MVar N.Connection -> RabbitConfig -> IO ()
+resetConnection connRef rc = do
+    putStrLn "Connection was closed, trying a new one for the next run."
+    _ <- takeMVar connRef
+    conn' <- createConnection rc
+    createCronExchange rc conn'
+    putMVar connRef conn'
 
+
+waitForConnectionException :: Event -> MVar N.Connection -> RabbitConfig -> IO ()
+waitForConnectionException e connRef rc = do
+  E.wait e
+  resetConnection connRef rc
+  E.clear e
+  waitForConnectionException e connRef rc
+
+-- TODO rename this to something else
 someFunc :: IO ()
 someFunc = do
-  conn <- openConnection "127.0.0.1" "/" "guest" "guest"
-  chan <- openChannel conn
-  let en = "cron.exchange"
-  createCronExchange chan en 
-  declareQueue chan newQueue {queueName = "test.cron.queue"}
+  configPath : _ <- getArgs
+  PidgeonConfig{rabbit=rc, cron=CronConfig{schedules=cs, forceUniqueTimes=fum}} <- C.readConfig configPath
+  -- TODO print out the errors
+  let (_, s) = createSchedules cs
+  let uniqueSchedules = dedupEntriesByTime s
+  let fu = maybe True id fum
 
-  bindQueue chan "test.cron.queue" en "cron.min.1"
+  case (fu, length uniqueSchedules == length s) of
+    (True, False) -> error "This config file has forceUniqueSchedules set to true, and the schedules contain duplicate time entries. Exiting"
+    _ -> do
+      let en = exchangeName rc
+      conn <- createConnection rc
+      connRef <- newMVar conn
+      createCronExchange rc conn
 
-  consumeMsgs chan "test.cron.queue" Ack testCallBack
-  
-  sendCronMessage chan en "cron.min.1" 
-  getLine
-  closeConnection conn
-  putStrLn "connection closed"
+      -- for when rabbitmq servers cleanly close the connection
+      N.addConnectionClosedHandler conn True $ resetConnection connRef rc
+
+      ce <- E.new
+      let jobs = crontabsToRabbitJobs (connRef, en, ce) s
+
+      _ <- execSchedule $ do
+        addJobsToSchedule jobs
+
+      --the connection cloesdhandler doesn't always fire when an exception is thrown
+      --even though the Network.AMQP library says it should so
+      _ <- forkIO $ waitForConnectionException ce connRef rc
+
+      putStrLn "Started pidgeon scheduler service"
+      -- TODO have it wait for a normal kill signal
+      _ <- getLine
+      N.closeConnection conn
+      return ()

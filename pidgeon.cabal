@@ -1,0 +1,83 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.31.2.
+--
+-- see: https://github.com/sol/hpack
+--
+-- hash: cb930ea26d9089732418dea358272d2cc8ef3a48f8ae36f595ae3881f4de6c2f
+
+name:           pidgeon
+version:        0.1.0.0
+description:    Please see the README on GitHub at <https://github.com/prakhunov/pidgeon#readme>
+homepage:       https://github.com/prakhunov/pidgeon#readme
+bug-reports:    https://github.com/prakhunov/pidgeon/issues
+author:         Peter Rakhunov
+maintainer:     prakhunov@gmail.com
+copyright:      2019 Peter Rakhunov
+license:        BSD3
+license-file:   LICENSE
+build-type:     Simple
+extra-source-files:
+    README.md
+    ChangeLog.md
+
+source-repository head
+  type: git
+  location: https://github.com/prakhunov/pidgeon
+
+library
+  exposed-modules:
+      Config
+      Scheduler
+      Lib
+      Rabbit
+  other-modules:
+      Paths_pidgeon
+  hs-source-dirs:
+      src
+  build-depends:
+      amqp
+    , base >=4.7 && <5
+    , bytestring
+    , cron
+    , text
+    , tomland
+    , network
+    , containers
+    , mtl
+    , concurrent-extra
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N  -Wall
+  default-language: Haskell2010
+
+executable pidgeon-exe
+  main-is: Main.hs
+  other-modules:
+      Paths_pidgeon
+  hs-source-dirs:
+      app
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N  -Wall
+  build-depends:
+      amqp
+    , base >=4.7 && <5
+    , bytestring
+    , cron
+    , pidgeon
+    , text
+  default-language: Haskell2010
+
+test-suite pidgeon-test
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  other-modules:
+      Paths_pidgeon
+  hs-source-dirs:
+      test
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall
+  build-depends:
+      amqp
+    , base >=4.7 && <5
+    , bytestring
+    , cron
+    , pidgeon
+    , text
+  default-language: Haskell2010
