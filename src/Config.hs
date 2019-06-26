@@ -59,7 +59,7 @@ cronConfigCodec = CronConfig
 rabbitServerCodec :: TomlCodec RabbitServer
 rabbitServerCodec = RabbitServer
   <$> Toml.text "host" .= host
-  <*> Toml.dioptional (portNumberCodec) .= port
+  <*> Toml.dioptional portNumberCodec .= port
 
 
 rabbitConfigCodec :: TomlCodec RabbitConfig
@@ -77,5 +77,5 @@ pidgeonConfigCodec = PidgeonConfig
   <$> Toml.table rabbitConfigCodec "rabbit" .= rabbit
   <*> Toml.table cronConfigCodec "cron" .= cron
 
-readConfig :: FilePath -> IO (PidgeonConfig)
-readConfig path = Toml.decodeFile pidgeonConfigCodec path
+readConfig :: FilePath -> IO PidgeonConfig
+readConfig = Toml.decodeFile pidgeonConfigCodec

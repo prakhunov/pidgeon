@@ -11,18 +11,20 @@ import qualified Config as C
 import System.Cron.Schedule
 import Scheduler
 import Control.Concurrent.MVar
-import Rabbit (createConnection, createCronExchange)
+import Rabbit (createConnection)
 import Control.Concurrent.Event ( Event )
 import Control.Concurrent (forkIO)
 import qualified Control.Concurrent.Event as E
 import System.Environment
+import Data.Maybe (fromMaybe)
 
 
 
 -- TODO instead of passing the mvar'ed connection and event around, use this object and make a reader monad
 data RabbitContext = RabbitContext
   { connection :: MVar N.Connection,
-    exceptionEvent :: Event
+    exceptionEvent :: Event,
+    rExchangeName :: ExchangeName
   }
 
 
@@ -49,7 +51,7 @@ someFunc = do
   -- TODO print out the errors
   let (_, s) = createSchedules cs
   let uniqueSchedules = dedupEntriesByTime s
-  let fu = maybe True id fum
+  let fu = fromMaybe True fum
 
   case (fu, length uniqueSchedules == length s) of
     (True, False) -> error "This config file has forceUniqueSchedules set to true, and the schedules contain duplicate time entries. Exiting"
@@ -63,7 +65,7 @@ someFunc = do
       ce <- E.new
       let jobs = crontabsToRabbitJobs (connRef, en, ce) s
 
-      _ <- execSchedule $ do
+      _ <- execSchedule $
         addJobsToSchedule jobs
 
       --the connection cloesdhandler doesn't always fire when an exception is thrown

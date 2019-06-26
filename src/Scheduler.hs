@@ -67,13 +67,13 @@ rabbitJob (conn, exchangeName, e) k = do
   c <- try(openChannel conn') :: IO (Either SomeException Channel)
   case c of
     Left _ -> do
-      putStrLn $ "Got an error opening a channel, connection closed."
+      putStrLn "Got an error opening a channel, connection closed."
       E.set e
     Right chan -> do
       r <- try(publishMsg chan exchangeName k $ newMsg {msgBody = ""}) :: IO (Either SomeException (Maybe Int))
       case r of
         Left _ -> do
-          putStrLn $ "Got an error trying to publish a msg"
+          putStrLn "Got an error trying to publish a msg"
           E.set e
         Right _ -> do
           putStrLn $ "Published following cron job: " ++ T.unpack k

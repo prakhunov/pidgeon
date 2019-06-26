@@ -10,7 +10,7 @@ import Network.Socket (PortNumber)
 import qualified Network.AMQP as N (openConnection'', Connection, ConnectionOpts(..),
                                    plain, amqplain, declareExchange, newExchange,
                                    exchangeName, exchangeType, openChannel, closeChannel)
-import Data.Maybe (maybe)
+import Data.Maybe (fromMaybe)
 import qualified Data.Text as T (unpack)
 import Control.Exception
 import Control.Concurrent (threadDelay)
@@ -57,6 +57,6 @@ createConnection config@RabbitConfig {virtualHost=vh, username=un,
         Right _ -> return conn
   where
     auth = [N.plain un p, N.amqplain un p]
-    cn' = maybe "pidgeon" id cn
+    cn' = fromMaybe "pidgeon" cn
     s' = convertServers s
     sleep = threadDelay 5000000
