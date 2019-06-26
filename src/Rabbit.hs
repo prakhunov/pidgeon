@@ -1,4 +1,3 @@
-{-# OPTIONS -Wno-unused-top-binds #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Rabbit
@@ -10,7 +9,7 @@ import Config (RabbitConfig(..), RabbitServer(..))
 import Network.Socket (PortNumber)
 import qualified Network.AMQP as N (openConnection'', Connection, ConnectionOpts(..),
                                    plain, amqplain, declareExchange, newExchange,
-                                   exchangeName, exchangeType, openChannel)
+                                   exchangeName, exchangeType, openChannel, closeChannel)
 import Data.Maybe (maybe)
 import qualified Data.Text as T (unpack)
 import Control.Exception
@@ -28,6 +27,7 @@ createCronExchange :: RabbitConfig -> N.Connection -> IO ()
 createCronExchange config conn = do
   chan <- N.openChannel conn
   N.declareExchange chan $ N.newExchange {N.exchangeName = en, N.exchangeType = "direct"}
+  N.closeChannel chan
   where
     en = exchangeName config
 
@@ -45,11 +45,18 @@ createConnection config@RabbitConfig {virtualHost=vh, username=un,
   case r of
     Left _ -> do
       putStrLn "Error opening connection, waiting 5 seconds."
-      threadDelay 5000000
+      sleep
       createConnection config
     Right conn -> do
-      return conn
+      e <- try(createCronExchange config conn) :: IO (Either SomeException ())
+      case e of
+        Left _ -> do
+          putStrLn "Error creating an exchange, trying again in 5 seconds."
+          sleep
+          createConnection config
+        Right _ -> return conn
   where
     auth = [N.plain un p, N.amqplain un p]
     cn' = maybe "pidgeon" id cn
     s' = convertServers s
+    sleep = threadDelay 5000000

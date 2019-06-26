@@ -31,7 +31,6 @@ resetConnection connRef rc = do
     putStrLn "Connection was closed, trying a new one for the next run."
     _ <- takeMVar connRef
     conn' <- createConnection rc
-    createCronExchange rc conn'
     putMVar connRef conn'
 
 
@@ -58,8 +57,6 @@ someFunc = do
       let en = exchangeName rc
       conn <- createConnection rc
       connRef <- newMVar conn
-      createCronExchange rc conn
-
       -- for when rabbitmq servers cleanly close the connection
       N.addConnectionClosedHandler conn True $ resetConnection connRef rc
 
