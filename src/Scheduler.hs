@@ -40,7 +40,7 @@ validRoutingKey k = T.length k <= 255 && T.length k > 0 && T.all valid k
     invalidCharacters = S.fromList ['#', '*']
     valid c = (C.isAlphaNum c && S.notMember c invalidCharacters) || (c == '.')
 
-invalidRoutingKey :: Text -> Bool
+invalidRoutingKey :: RoutingKey -> Bool
 invalidRoutingKey = not . validRoutingKey
 
 splitEntries :: [Either String CrontabEntry] -> ([String], [ValidatedCrontabEntry])
