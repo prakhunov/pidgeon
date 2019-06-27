@@ -2,16 +2,25 @@
     virtualHost = "/"
     username = "guest"
     password = "guest"
+    exchangeName = "cron.exchange"
+    tls = False
 
     # optional
     connectionName = "cron scheduler"
-
-    exchangeName = "cron.exchange"
     # can be repeated if you are connecting to a cluster
     [[rabbit.servers]]
     host = "localhost"
     #port optional defaults to 5672
     port = 5672
+
+# this will use the sessions TTL mechanism just in case this program exits, the TTL will be automatically set to the smallest unit of time in seconds * 1.5 in the schedule list since it will renew the session anytime a job is published
+[consul]
+    #the service name to show in the consul ui
+    serviceName = "pidgeon"
+    #should usually be localhost since you usually want a consul agent deployed on the same server as where any app that accesses consul is hosted
+    host = "localhost"
+    httpPort = 8500
+    tls = False
 
 [cron]
 

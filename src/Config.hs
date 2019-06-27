@@ -17,6 +17,14 @@ import qualified Toml
 
 type ExchangeName = Text
 
+
+data ConsulConfig = ConsulConfig
+  { consulServiceName :: Text,
+    consulHost :: Text,
+    consulHttpPort :: PortNumber,
+    consulTls :: Bool
+  } deriving (Show)
+
 data RabbitServer = RabbitServer
   { host :: Text,
     port :: Maybe PortNumber
@@ -28,6 +36,7 @@ data RabbitConfig = RabbitConfig
     password :: Text,
     connectionName :: Maybe Text,
     exchangeName :: ExchangeName,
+    rabbitTls :: Bool,
     servers :: [RabbitServer]
   } deriving (Show)
 
@@ -39,8 +48,17 @@ data CronConfig = CronConfig
 
 data PidgeonConfig = PidgeonConfig
   { rabbit :: RabbitConfig,
-    cron :: CronConfig
+    cron :: CronConfig,
+    consul :: ConsulConfig
   } deriving (Show)
+
+
+consulConfigCodec :: TomlCodec ConsulConfig
+consulConfigCodec = ConsulConfig
+  <$> Toml.text "serviceName" .= consulServiceName
+  <*> Toml.text "host" .= consulHost
+  <*> portNumberCodec "httpPort" .= consulHttpPort
+  <*> Toml.bool "tls" .= consulTls
 
 
 fromIntegralWord16 :: (Integral a, Num b) => a -> b
@@ -48,8 +66,8 @@ fromIntegralWord16 a
   | a > 65535 || a <= 0 = error "Port Number must be between 1 and 65535"
   | otherwise = fromIntegral a
 
-portNumberCodec :: TomlCodec PortNumber
-portNumberCodec = Toml.dimap fromIntegralWord16 fromIntegralWord16 $ Toml.int "port"
+portNumberCodec :: Toml.Key -> TomlCodec PortNumber
+portNumberCodec k = Toml.dimap fromIntegralWord16 fromIntegralWord16 $ Toml.int k
 
 cronConfigCodec :: TomlCodec CronConfig
 cronConfigCodec = CronConfig
@@ -61,7 +79,7 @@ cronConfigCodec = CronConfig
 rabbitServerCodec :: TomlCodec RabbitServer
 rabbitServerCodec = RabbitServer
   <$> Toml.text "host" .= host
-  <*> Toml.dioptional portNumberCodec .= port
+  <*> Toml.dioptional (portNumberCodec "port") .= port
 
 
 rabbitConfigCodec :: TomlCodec RabbitConfig
@@ -71,13 +89,14 @@ rabbitConfigCodec = RabbitConfig
   <*> Toml.text "password" .= password
   <*> Toml.dioptional (Toml.text "connectionName") .= connectionName
   <*> Toml.text "exchangeName" .= exchangeName
+  <*> Toml.bool "tls" .= rabbitTls
   <*> Toml.list rabbitServerCodec "servers" .= servers
-
 
 pidgeonConfigCodec :: TomlCodec PidgeonConfig
 pidgeonConfigCodec = PidgeonConfig
   <$> Toml.table rabbitConfigCodec "rabbit" .= rabbit
   <*> Toml.table cronConfigCodec "cron" .= cron
+  <*> Toml.table consulConfigCodec "consul" .= consul
 
 readConfig :: FilePath -> IO PidgeonConfig
 readConfig = Toml.decodeFile pidgeonConfigCodec

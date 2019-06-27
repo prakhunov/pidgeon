@@ -38,7 +38,6 @@ newtype RabbitMonad a = RabbitMonad (ReaderT RabbitContext IO a)
 runRabbitMonad :: RabbitContext -> RabbitMonad a -> IO a
 runRabbitMonad ctx (RabbitMonad m) = runReaderT m ctx
 
-
 resetConnectionHandler :: MVar N.Connection -> RabbitConfig -> IO ()
 resetConnectionHandler connRef rc = do
     putStrLn "Connection was closed, trying a new one for the next run."
@@ -67,6 +66,7 @@ createConnection config@RabbitConfig {virtualHost=vh, username=un,
                               password=p, connectionName=cn,
                               servers=s}
   = do
+  -- TODO support TLS
   let cno = N.ConnectionOpts {N.coServers=s', N.coVHost=vh, N.coAuth=auth,
                               N.coMaxFrameSize=Just 131072, N.coHeartbeatDelay=Just 15,
                               N.coMaxChannel=Nothing, N.coTLSSettings=Nothing,

@@ -25,18 +25,21 @@ printErrors errors = mapM_ putStrLn errors
 
 
 -- TODO connect to Consul so you can use it for distributed locking (then you can run this app on multiple machines for HA)
+-- TODO work with Rabbit over TLS
+-- TODO work with Consul over TLS
 
 runJobScheduler :: IO ()
 runJobScheduler = do
+  -- TODO check length and have a helpful message if the config hasn't been specified
   configPath : _ <- getArgs
-  PidgeonConfig{rabbit=rc, cron=CronConfig{schedules=cs, forceUniqueTimes=fum, newConnectionTimeout=nct}} <- C.readConfig configPath
+  PidgeonConfig{rabbit=rc, cron=CronConfig{schedules=cs, forceUniqueTimes=fut, newConnectionTimeout=nct}} <- C.readConfig configPath
   let (errors , s) = partitionEithers $ createSchedules cs
   printErrors errors
   let uniqueSchedules = dedupEntriesByTime s
-  let fu = fromMaybe True fum
+  let fut' = fromMaybe True fut
 
-  case (fu, length uniqueSchedules == length s) of
-    (True, False) -> error "This config file has forceUniqueSchedules set to true, and the schedules contain duplicate time entries. Exiting"
+  case (fut', length uniqueSchedules == length s) of
+    (True, False) -> error "This config file has forceUniqueSchedules set to true, and the schedules contain duplicate time entries. Exiting."
     _ -> do
       let en = exchangeName rc
       conn <- createConnection rc

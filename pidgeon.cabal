@@ -31,6 +31,7 @@ library
       Scheduler
       Lib
       Rabbit
+      Consul
   other-modules:
       Paths_pidgeon
   hs-source-dirs:
