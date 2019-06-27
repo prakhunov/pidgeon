@@ -7,7 +7,6 @@ module Rabbit
     RabbitMonad,
     runRabbitMonad,
     resetConnectionHandler,
-    waitForConnectionExceptionHandler
   ) where
 
 import Config (RabbitConfig(..), RabbitServer(..), ExchangeName)
@@ -21,8 +20,6 @@ import qualified Data.Text as T (unpack)
 import Control.Exception
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.MVar
-import Control.Concurrent.Event (Event)
-import qualified Control.Concurrent.Event as E
 import Control.Monad.Reader
 
 data RabbitContext = RabbitContext
@@ -49,15 +46,6 @@ resetConnectionHandler connRef rc = do
     conn' <- createConnection rc
     N.addConnectionClosedHandler conn' True $ resetConnectionHandler connRef rc
     putMVar connRef conn'
-
-
-waitForConnectionExceptionHandler :: Event -> MVar N.Connection -> RabbitConfig -> IO ()
-waitForConnectionExceptionHandler e connRef rc = do
-  E.wait e
-  resetConnectionHandler connRef rc
-  E.clear e
-  waitForConnectionExceptionHandler e connRef rc
-
 
 convertServers :: [RabbitServer] -> [(String, PortNumber)]
 convertServers = map sc
