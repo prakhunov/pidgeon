@@ -1,20 +1,62 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 module Rabbit
   ( createConnection,
-    createCronExchange
+    RabbitContext(..),
+    RabbitMonad,
+    runRabbitMonad,
+    resetConnectionHandler,
+    waitForConnectionExceptionHandler
   ) where
 
-import Config (RabbitConfig(..), RabbitServer(..))
+import Config (RabbitConfig(..), RabbitServer(..), ExchangeName)
 import Network.Socket (PortNumber)
 import qualified Network.AMQP as N (openConnection'', Connection, ConnectionOpts(..),
                                    plain, amqplain, declareExchange, newExchange,
-                                   exchangeName, exchangeType, openChannel, closeChannel)
+                                   exchangeName, exchangeType, openChannel, closeChannel,
+                                   addConnectionClosedHandler)
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T (unpack)
 import Control.Exception
 import Control.Concurrent (threadDelay)
+import Control.Concurrent.MVar
+import Control.Concurrent.Event (Event)
+import qualified Control.Concurrent.Event as E
+import Control.Monad.Reader
 
+data RabbitContext = RabbitContext
+  { ctxConnection :: MVar N.Connection,
+    ctxExchangeName :: ExchangeName,
+    ctxNewConnectionTimeout :: Int
+  }
+
+newtype RabbitMonad a = RabbitMonad (ReaderT RabbitContext IO a)
+  deriving ( Functor
+           , Applicative
+           , Monad
+           , MonadReader RabbitContext
+           , MonadIO)
+
+runRabbitMonad :: RabbitContext -> RabbitMonad a -> IO a
+runRabbitMonad ctx (RabbitMonad m) = runReaderT m ctx
+
+
+resetConnectionHandler :: MVar N.Connection -> RabbitConfig -> IO ()
+resetConnectionHandler connRef rc = do
+    putStrLn "Connection was closed, trying a new one for the next run."
+    _ <- takeMVar connRef
+    conn' <- createConnection rc
+    N.addConnectionClosedHandler conn' True $ resetConnectionHandler connRef rc
+    putMVar connRef conn'
+
+
+waitForConnectionExceptionHandler :: Event -> MVar N.Connection -> RabbitConfig -> IO ()
+waitForConnectionExceptionHandler e connRef rc = do
+  E.wait e
+  resetConnectionHandler connRef rc
+  E.clear e
+  waitForConnectionExceptionHandler e connRef rc
 
 
 convertServers :: [RabbitServer] -> [(String, PortNumber)]
@@ -38,10 +80,11 @@ createConnection config@RabbitConfig {virtualHost=vh, username=un,
                               servers=s}
   = do
   let cno = N.ConnectionOpts {N.coServers=s', N.coVHost=vh, N.coAuth=auth,
-                            N.coMaxFrameSize=Just 131072, N.coHeartbeatDelay=Nothing,
-                            N.coMaxChannel=Nothing, N.coTLSSettings=Nothing,
-                            N.coName=Just cn'}
+                              N.coMaxFrameSize=Just 131072, N.coHeartbeatDelay=Just 15,
+                              N.coMaxChannel=Nothing, N.coTLSSettings=Nothing,
+                              N.coName=Just cn'}
   r <- try(N.openConnection'' cno) :: IO (Either SomeException N.Connection)
+  -- TODO Catch only ConnectionException's and log the others
   case r of
     Left _ -> do
       putStrLn "Error opening connection, waiting 5 seconds."
@@ -54,7 +97,9 @@ createConnection config@RabbitConfig {virtualHost=vh, username=un,
           putStrLn "Error creating an exchange, trying again in 5 seconds."
           sleep
           createConnection config
-        Right _ -> return conn
+        Right _ -> do
+          putStrLn "Opened a connection to RabbitMQ"
+          return conn
   where
     auth = [N.plain un p, N.amqplain un p]
     cn' = fromMaybe "pidgeon" cn

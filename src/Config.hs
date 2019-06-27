@@ -33,7 +33,8 @@ data RabbitConfig = RabbitConfig
 
 data CronConfig = CronConfig
   { forceUniqueTimes :: Maybe Bool,
-    schedules :: [Text]
+    schedules :: [Text],
+    newConnectionTimeout :: Int
   } deriving (Show)
 
 data PidgeonConfig = PidgeonConfig
@@ -54,6 +55,7 @@ cronConfigCodec :: TomlCodec CronConfig
 cronConfigCodec = CronConfig
   <$> Toml.dioptional (Toml.bool "forceUniqueTimes") .= forceUniqueTimes
   <*> Toml.arrayOf Toml._Text "schedules" .= schedules
+  <*> Toml.int "newConnectionTimeout" .= newConnectionTimeout
 
 
 rabbitServerCodec :: TomlCodec RabbitServer

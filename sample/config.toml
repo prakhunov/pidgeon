@@ -19,6 +19,9 @@
     #if forceUniqueTimes is set to false it will send possibly duplicate messages if the routing keys are the same
     #defaults to true
     forceUniqueTimes = true
+
+    #the amount of time to wait for a new connection to be available if the connection died between jobs. Ideally set to something less than a minute
+    newConnectionTimeout = 30
     
     #follows a crontab format the command in this case is the routing key, must be a valid routing key (no spaces)  or will throw an error, and exit
     schedules = [

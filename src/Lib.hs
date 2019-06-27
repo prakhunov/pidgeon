@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Lib
-    ( someFunc
+    ( runJobScheduler
     ) where
 
 import qualified Network.AMQP as N
@@ -11,45 +11,27 @@ import qualified Config as C
 import System.Cron.Schedule
 import Scheduler
 import Control.Concurrent.MVar
-import Rabbit (createConnection)
-import Control.Concurrent.Event ( Event )
-import Control.Concurrent (forkIO)
-import qualified Control.Concurrent.Event as E
+import Rabbit
 import System.Environment
 import Data.Maybe (fromMaybe)
+import Data.Either (partitionEithers)
+import Control.Monad.Reader (liftIO)
 
 
 
--- TODO instead of passing the mvar'ed connection and event around, use this object and make a reader monad
-data RabbitContext = RabbitContext
-  { connection :: MVar N.Connection,
-    exceptionEvent :: Event,
-    rExchangeName :: ExchangeName
-  }
+printErrors :: [String] -> IO ()
+printErrors [] = putStrLn "No errors found in the config file."
+printErrors errors = mapM_ putStrLn errors
 
 
-resetConnection :: MVar N.Connection -> RabbitConfig -> IO ()
-resetConnection connRef rc = do
-    putStrLn "Connection was closed, trying a new one for the next run."
-    _ <- takeMVar connRef
-    conn' <- createConnection rc
-    putMVar connRef conn'
+-- TODO connect to Consul so you can use it for distributed locking (then you can run this app on multiple machines for HA)
 
-
-waitForConnectionException :: Event -> MVar N.Connection -> RabbitConfig -> IO ()
-waitForConnectionException e connRef rc = do
-  E.wait e
-  resetConnection connRef rc
-  E.clear e
-  waitForConnectionException e connRef rc
-
--- TODO rename this to something else
-someFunc :: IO ()
-someFunc = do
+runJobScheduler :: IO ()
+runJobScheduler = do
   configPath : _ <- getArgs
-  PidgeonConfig{rabbit=rc, cron=CronConfig{schedules=cs, forceUniqueTimes=fum}} <- C.readConfig configPath
-  -- TODO print out the errors
-  let (_, s) = createSchedules cs
+  PidgeonConfig{rabbit=rc, cron=CronConfig{schedules=cs, forceUniqueTimes=fum, newConnectionTimeout=nct}} <- C.readConfig configPath
+  let (errors , s) = partitionEithers $ createSchedules cs
+  printErrors errors
   let uniqueSchedules = dedupEntriesByTime s
   let fu = fromMaybe True fum
 
@@ -59,21 +41,16 @@ someFunc = do
       let en = exchangeName rc
       conn <- createConnection rc
       connRef <- newMVar conn
-      -- for when rabbitmq servers cleanly close the connection
-      N.addConnectionClosedHandler conn True $ resetConnection connRef rc
 
-      ce <- E.new
-      let jobs = crontabsToRabbitJobs (connRef, en, ce) s
+      N.addConnectionClosedHandler conn True $ resetConnectionHandler connRef rc
+      let rabbitContext = RabbitContext connRef en nct
 
-      _ <- execSchedule $
-        addJobsToSchedule jobs
-
-      --the connection cloesdhandler doesn't always fire when an exception is thrown
-      --even though the Network.AMQP library says it should so
-      _ <- forkIO $ waitForConnectionException ce connRef rc
+      _ <- runRabbitMonad rabbitContext $ do
+        jobs <- crontabsToRabbitJobs s
+        liftIO $ execSchedule $
+          addJobsToSchedule jobs
 
       putStrLn "Started pidgeon scheduler service"
       -- TODO have it wait for a normal kill signal
       _ <- getLine
       N.closeConnection conn
-      return ()
