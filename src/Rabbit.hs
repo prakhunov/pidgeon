@@ -2,11 +2,13 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 module Rabbit
-  ( createConnection,
-    RabbitContext(..),
+  ( RabbitContext(..),
     RabbitMonad,
+    createRabbitContextAndConnection,
     runRabbitMonad,
-    resetConnectionHandler,
+    RoutingKey,
+    validRoutingKey,
+    invalidRoutingKey
   ) where
 
 import Config (RabbitConfig(..), RabbitServer(..), ExchangeName)
@@ -14,21 +16,22 @@ import Network.Socket (PortNumber)
 import qualified Network.AMQP as N (openConnection'', Connection, ConnectionOpts(..),
                                    plain, amqplain, declareExchange, newExchange,
                                    exchangeName, exchangeType, openChannel, closeChannel,
-                                   addConnectionClosedHandler, TLSSettings(..))
+                                   TLSSettings(..), Channel, msgBody, publishMsg, newMsg,
+                                   addConnectionClosedHandler)
 
 import Data.Maybe (fromMaybe)
-import qualified Data.Text as T (unpack)
+import Data.Text (Text)
+import qualified Data.Text as T (unpack, length, all)
+import qualified Data.ByteString.Lazy.Char8 as BL (pack)
+import qualified Data.Set as S (notMember, fromList)
+import qualified Data.Char as C (isAlphaNum)
 import Control.Exception
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.MVar
 import Control.Monad.Reader
 
-data RabbitContext = RabbitContext
-  { ctxConnection :: MVar N.Connection,
-    ctxExchangeName :: ExchangeName,
-    ctxNewConnectionTimeout :: Int,
-    refreshConsulSession :: IO Bool,
-    signalProgramRestart :: MVar ()
+
+newtype RabbitContext = RabbitContext
+  { sendMessage :: RoutingKey -> String -> IO ()
   }
 
 newtype RabbitMonad a = RabbitMonad (ReaderT RabbitContext IO a)
@@ -41,13 +44,53 @@ newtype RabbitMonad a = RabbitMonad (ReaderT RabbitContext IO a)
 runRabbitMonad :: RabbitContext -> RabbitMonad a -> IO a
 runRabbitMonad ctx (RabbitMonad m) = runReaderT m ctx
 
-resetConnectionHandler :: MVar N.Connection -> RabbitConfig -> IO ()
-resetConnectionHandler connRef rc = do
-    putStrLn "Connection was closed, trying a new one for the next run."
-    _ <- takeMVar connRef
-    conn' <- createConnection rc
-    N.addConnectionClosedHandler conn' True $ resetConnectionHandler connRef rc
-    putMVar connRef conn'
+
+type RoutingKey = Text
+-- config, consul lock refresh function
+type ConsulRefresh = IO Bool
+type RestartHandler = String -> IO ()
+
+validRoutingKey :: RoutingKey -> Bool
+validRoutingKey k = T.length k <= 255 && T.length k > 0 && T.all valid k
+  where
+    invalidCharacters = S.fromList ['#', '*']
+    valid c = (C.isAlphaNum c && S.notMember c invalidCharacters) || (c == '.')
+
+invalidRoutingKey :: RoutingKey -> Bool
+invalidRoutingKey = not . validRoutingKey
+
+createRabbitContextAndConnection :: RabbitConfig -> ConsulRefresh -> RestartHandler -> IO (RabbitContext, N.Connection)
+createRabbitContextAndConnection config consulHandler restartHandler = do
+  connection <- createConnection config
+  N.addConnectionClosedHandler connection False $ restartHandler "Rabbit connection was closed"
+  return (RabbitContext $ sendMessage' connection consulHandler restartHandler exchange, connection)
+  where
+    exchange = exchangeName config
+
+
+sendMessage' :: N.Connection -> ConsulRefresh -> RestartHandler -> ExchangeName -> RoutingKey -> String -> IO ()
+sendMessage' conn consulRefresh restartHandler exch k message = do
+  refreshed <- consulRefresh
+  if refreshed then do
+    c <- try(N.openChannel conn) :: IO (Either SomeException N.Channel)
+    -- TODO log the exception's better
+    case c of
+      Left _ ->
+        restartHandler $ "Got an error opening a channel, connection closed. Restarting application while running: " ++ T.unpack k
+      Right chan -> do
+        r <- try(N.publishMsg chan exch k $ N.newMsg {N.msgBody = BL.pack message}) :: IO (Either SomeException (Maybe Int))
+        case r of
+          Left _ ->
+            restartHandler $ "Got an error publishing a message, connection closed. Restarting application while running: : " ++ T.unpack k
+          Right _ -> do
+            putStrLn $ "Published following cron job: " ++ T.unpack k
+            closed <- try(N.closeChannel chan) :: IO (Either SomeException ())
+            case closed of
+              Left _ ->
+                restartHandler "Got an error closing a channel, restarting application."
+              _ -> return ()
+  else
+    restartHandler $ "Restarting application due to not being able to refresh a consul session for: " ++ T.unpack k
 
 convertServers :: [RabbitServer] -> [(String, PortNumber)]
 convertServers = map sc

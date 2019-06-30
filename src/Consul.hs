@@ -3,7 +3,7 @@
 module Consul
   ( initConsul,
     acquireLock,
-    ttlFunc
+    refreshSession,
   ) where
 
 import Config(ConsulConfig(..))
@@ -16,9 +16,8 @@ initConsul :: ConsulConfig -> IO ConsulClient
 initConsul ConsulConfig{consulHost=h, consulHttpPort=p, consulTls=True  } = initializeTlsConsulClient h p Nothing
 initConsul ConsulConfig{consulHost=h, consulHttpPort=p, consulTls=False } = initializeConsulClient h p Nothing
 
-ttlFunc :: ConsulConfig -> Session -> IO Bool
-ttlFunc config s = do
-  c <- initConsul config
+refreshSession :: ConsulClient -> Session -> IO Bool
+refreshSession c s = do
   putStrLn "Refreshing consul session"
   r <- try(renewSession c s Nothing) :: IO (Either SomeException Bool)
   case r of
@@ -29,7 +28,7 @@ ttlFunc config s = do
       return False
 
 --this is a blocking method and won't return until it has acquired a consul lock
-acquireLock :: ConsulConfig -> IO Session
+acquireLock :: ConsulConfig -> IO (ConsulClient, Session)
 acquireLock config = do
   c <- initConsul config
   session' <- try(createSession c sr Nothing) :: IO (Either SomeException (Maybe Session))
@@ -39,7 +38,7 @@ acquireLock config = do
       case gotLock of
         Right True -> do
           putStrLn "Acquired a consul lock."
-          return session
+          return (c, session)
         Right False -> do
           -- if destroying a session fails while trying to acquire the lock worked that means the connection to consul died
           -- so still retry
