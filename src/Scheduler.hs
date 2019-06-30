@@ -17,33 +17,17 @@ import System.Cron.Parser (parseCrontabEntry)
 import System.Cron.Types (CrontabEntry(..), CronCommand(..), CronSchedule(..))
 import Config (ExchangeName)
 import Data.Text (Text)
-import Network.AMQP (Channel, publishMsg, openChannel, newMsg, msgBody, closeChannel)
 import System.Cron.Schedule
 import Control.Monad.State
-import Control.Concurrent.MVar
-import Control.Exception
-import Data.Time.Clock
 
-import qualified Data.Text as T (length, all, unpack)
-import qualified Data.Set as S (notMember, fromList)
+import qualified Data.Text as T (unpack)
 import qualified Data.List as L (nubBy)
-import qualified Data.Char as C (isAlphaNum)
 
 import Control.Monad.Reader
-import Rabbit (RabbitContext(..), RabbitMonad)
+import Rabbit (RabbitContext(..), RabbitMonad, RoutingKey, invalidRoutingKey)
 
-type RoutingKey = Text
 
 data ValidatedCrontabEntry = ValidatedCrontabEntry CronSchedule CronCommand
-
-validRoutingKey :: RoutingKey -> Bool
-validRoutingKey k = T.length k <= 255 && T.length k > 0 && T.all valid k
-  where
-    invalidCharacters = S.fromList ['#', '*']
-    valid c = (C.isAlphaNum c && S.notMember c invalidCharacters) || (c == '.')
-
-invalidRoutingKey :: RoutingKey -> Bool
-invalidRoutingKey = not . validRoutingKey
 
 validateEntries :: [Either String CrontabEntry] -> [Either String ValidatedCrontabEntry]
 validateEntries = map validate
@@ -63,40 +47,10 @@ dedupEntriesByTime = L.nubBy timeEquals
 createSchedules :: [Text] -> [Either String ValidatedCrontabEntry]
 createSchedules = validateEntries . map parseCrontabEntry
 
-rabbitJob :: RabbitContext -> RoutingKey -> IO ()
-rabbitJob (RabbitContext connRef exch connTimeout refreshConsul signalRestart) k = do
-  -- check consul lock
-  refreshedSession <- refreshConsul
-  if refreshedSession then do
-    beforeLock <- getCurrentTime
-    conn' <- readMVar connRef
-    afterLock <- getCurrentTime
-    let timeDiffInSeconds = floor (afterLock `diffUTCTime` beforeLock) :: Int
-    if timeDiffInSeconds < connTimeout then do
-      c <- try(openChannel conn') :: IO (Either SomeException Channel)
-      -- TODO log the exception's better
-      case c of
-        Left _ ->
-          putStrLn $ "Got an error opening a channel, connection closed. Following job will run at it's next schedule: " ++ T.unpack k
-        Right chan -> do
-          r <- try(publishMsg chan exch k $ newMsg {msgBody = ""}) :: IO (Either SomeException (Maybe Int))
-          case r of
-            Left _ ->
-              putStrLn $ "Got an error trying to publish a msg. Following job will run at it's next schedule: " ++ T.unpack k
-            Right _ -> do
-              putStrLn $ "Published following cron job: " ++ T.unpack k
-              closeChannel chan
-    else
-      putStrLn $ "Took too long to get a rabbit connection not running the following job: " ++ T.unpack k
-  else do
-      putMVar signalRestart ()
-      putStrLn "Not running job error refreshing the consul session."
-
-
 crontabToRabbitJob :: ValidatedCrontabEntry -> RabbitMonad Job
 crontabToRabbitJob (ValidatedCrontabEntry t CronCommand{cronCommand=k}) = do
-  context <- ask
-  return $ Job t $ rabbitJob context k
+  RabbitContext sm <- ask
+  return $ Job t $ sm k ""
 
 crontabsToRabbitJobs :: [ValidatedCrontabEntry] -> RabbitMonad [Job]
 crontabsToRabbitJobs = mapM crontabToRabbitJob
