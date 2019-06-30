@@ -3,7 +3,7 @@
     username = "guest"
     password = "guest"
     exchangeName = "cron.exchange"
-    tls = False
+    tls = false
 
     # optional
     connectionName = "cron scheduler"
@@ -19,7 +19,7 @@
     #should usually be localhost since you usually want a consul agent deployed on the same server as where any app that accesses consul is hosted
     host = "localhost"
     httpPort = 8500
-    tls = False
+    tls = false
 
 [cron]
 
