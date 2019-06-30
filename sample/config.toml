@@ -13,7 +13,6 @@
     #port optional defaults to 5672
     port = 5672
 
-# this will use the sessions TTL mechanism just in case this program exits, the TTL will be automatically set to the smallest unit of time in seconds * 1.5 in the schedule list since it will renew the session anytime a job is published
 [consul]
     #the service name to show in the consul ui
     serviceName = "pidgeon"
@@ -29,7 +28,9 @@
     #defaults to true
     forceUniqueTimes = true
 
-    #the amount of time to wait for a new connection to be available if the connection died between jobs. Ideally set to something less than a minute
+    #the amount of time to wait for a new connection to be available if the connection died between jobs. Ideally set to something less than a minute, or
+    #something smaller than the smallest unit of work in the schedules list
+    # basically a TTL for the job
     newConnectionTimeout = 30
     
     #follows a crontab format the command in this case is the routing key, must be a valid routing key (no spaces)  or will throw an error, and exit

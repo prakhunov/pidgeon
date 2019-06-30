@@ -2,12 +2,14 @@
 
 module Scheduler
   ( dedupEntriesByTime,
+    addJobToSchedule,
     addJobsToSchedule,
     crontabToRabbitJob,
     crontabsToRabbitJobs,
     createSchedules,
     RoutingKey,
-    ExchangeName
+    ExchangeName,
+    ValidatedCrontabEntry(..)
   ) where
 
 
@@ -92,6 +94,11 @@ crontabToRabbitJob (ValidatedCrontabEntry t CronCommand{cronCommand=k}) = do
 
 crontabsToRabbitJobs :: [ValidatedCrontabEntry] -> RabbitMonad [Job]
 crontabsToRabbitJobs = mapM crontabToRabbitJob
+
+addJobToSchedule :: Job -> Schedule ()
+addJobToSchedule j = do
+  js <- get
+  put $ j : js
 
 addJobsToSchedule :: [Job] -> Schedule ()
 addJobsToSchedule j = do

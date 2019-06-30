@@ -17,6 +17,7 @@ import Data.Maybe (fromMaybe)
 import Data.Either (partitionEithers)
 import Control.Monad.Reader (liftIO)
 
+import Consul
 
 
 printErrors :: [String] -> IO ()
@@ -24,15 +25,11 @@ printErrors [] = putStrLn "No errors found in the config file."
 printErrors errors = mapM_ putStrLn errors
 
 
--- TODO connect to Consul so you can use it for distributed locking (then you can run this app on multiple machines for HA)
--- TODO work with Rabbit over TLS
--- TODO work with Consul over TLS
-
 runJobScheduler :: IO ()
 runJobScheduler = do
   -- TODO check length and have a helpful message if the config hasn't been specified
   configPath : _ <- getArgs
-  PidgeonConfig{rabbit=rc, cron=CronConfig{schedules=cs, forceUniqueTimes=fut, newConnectionTimeout=nct}} <- C.readConfig configPath
+  PidgeonConfig{rabbit=rc, cron=CronConfig{schedules=cs, forceUniqueTimes=fut, newConnectionTimeout=nct}, consul=consulConfig} <- C.readConfig configPath
   let (errors , s) = partitionEithers $ createSchedules cs
   printErrors errors
   let uniqueSchedules = dedupEntriesByTime s
@@ -41,6 +38,8 @@ runJobScheduler = do
   case (fut', length uniqueSchedules == length s) of
     (True, False) -> error "This config file has forceUniqueSchedules set to true, and the schedules contain duplicate time entries. Exiting."
     _ -> do
+      (consulClient, consulSession) <- acquireLock consulConfig
+
       let en = exchangeName rc
       conn <- createConnection rc
       connRef <- newMVar conn
@@ -50,8 +49,12 @@ runJobScheduler = do
 
       _ <- runRabbitMonad rabbitContext $ do
         jobs <- crontabsToRabbitJobs s
-        liftIO $ execSchedule $
+        liftIO $ execSchedule $ do
           addJobsToSchedule jobs
+          -- the consul ttl session refreshing will be occuring in the same scheduler as the job so that consul can truly
+          -- know if this program has failed or not
+          -- the ttl is set to 90s and this job will run every 60 seconds
+          addJob (ttlFunc consulClient consulSession) "* * * * *"
 
       putStrLn "Started pidgeon scheduler service"
       -- TODO have it wait for a normal kill signal

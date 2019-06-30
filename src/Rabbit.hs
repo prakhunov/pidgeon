@@ -14,7 +14,8 @@ import Network.Socket (PortNumber)
 import qualified Network.AMQP as N (openConnection'', Connection, ConnectionOpts(..),
                                    plain, amqplain, declareExchange, newExchange,
                                    exchangeName, exchangeType, openChannel, closeChannel,
-                                   addConnectionClosedHandler)
+                                   addConnectionClosedHandler, TLSSettings(..))
+
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T (unpack)
 import Control.Exception
@@ -64,12 +65,12 @@ createCronExchange config conn = do
 createConnection :: RabbitConfig -> IO N.Connection
 createConnection config@RabbitConfig {virtualHost=vh, username=un,
                               password=p, connectionName=cn,
-                              servers=s}
+                              servers=s,rabbitTls=isTls}
   = do
   -- TODO support TLS
   let cno = N.ConnectionOpts {N.coServers=s', N.coVHost=vh, N.coAuth=auth,
                               N.coMaxFrameSize=Just 131072, N.coHeartbeatDelay=Just 15,
-                              N.coMaxChannel=Nothing, N.coTLSSettings=Nothing,
+                              N.coMaxChannel=Nothing, N.coTLSSettings=tlsSetting,
                               N.coName=Just cn'}
   r <- try(N.openConnection'' cno) :: IO (Either SomeException N.Connection)
   -- TODO Catch only ConnectionException's and log the others
@@ -93,3 +94,6 @@ createConnection config@RabbitConfig {virtualHost=vh, username=un,
     cn' = fromMaybe "pidgeon" cn
     s' = convertServers s
     sleep = threadDelay 5000000
+    tlsSetting = case isTls of
+      False -> Nothing
+      True -> Just N.TLSTrusted

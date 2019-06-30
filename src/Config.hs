@@ -6,6 +6,7 @@ module Config
     RabbitServer (..),
     RabbitConfig (..),
     PidgeonConfig (..),
+    ConsulConfig (..),
     ExchangeName
   ) where
 
