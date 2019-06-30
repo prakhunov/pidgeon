@@ -26,7 +26,9 @@ import Control.Monad.Reader
 data RabbitContext = RabbitContext
   { ctxConnection :: MVar N.Connection,
     ctxExchangeName :: ExchangeName,
-    ctxNewConnectionTimeout :: Int
+    ctxNewConnectionTimeout :: Int,
+    refreshConsulSession :: IO Bool,
+    signalProgramRestart :: MVar ()
   }
 
 newtype RabbitMonad a = RabbitMonad (ReaderT RabbitContext IO a)
@@ -67,7 +69,6 @@ createConnection config@RabbitConfig {virtualHost=vh, username=un,
                               password=p, connectionName=cn,
                               servers=s,rabbitTls=isTls}
   = do
-  -- TODO support TLS
   let cno = N.ConnectionOpts {N.coServers=s', N.coVHost=vh, N.coAuth=auth,
                               N.coMaxFrameSize=Just 131072, N.coHeartbeatDelay=Just 15,
                               N.coMaxChannel=Nothing, N.coTLSSettings=tlsSetting,
@@ -94,6 +95,4 @@ createConnection config@RabbitConfig {virtualHost=vh, username=un,
     cn' = fromMaybe "pidgeon" cn
     s' = convertServers s
     sleep = threadDelay 5000000
-    tlsSetting = case isTls of
-      False -> Nothing
-      True -> Just N.TLSTrusted
+    tlsSetting = if isTls then Just N.TLSTrusted else Nothing

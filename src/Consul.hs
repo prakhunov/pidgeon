@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE FlexibleContexts #-}
 
 module Consul
   ( initConsul,
@@ -11,39 +10,51 @@ import Config(ConsulConfig(..))
 
 import Network.Consul
 import Control.Concurrent (threadDelay)
+import Control.Exception
 
 initConsul :: ConsulConfig -> IO ConsulClient
 initConsul ConsulConfig{consulHost=h, consulHttpPort=p, consulTls=True  } = initializeTlsConsulClient h p Nothing
 initConsul ConsulConfig{consulHost=h, consulHttpPort=p, consulTls=False } = initializeConsulClient h p Nothing
 
-
-ttlFunc :: ConsulClient -> Session -> IO ()
-ttlFunc c s = do
+ttlFunc :: ConsulConfig -> Session -> IO Bool
+ttlFunc config s = do
+  c <- initConsul config
   putStrLn "Refreshing consul session"
-  _ <- renewSession c s Nothing
-  return ()
+  r <- try(renewSession c s Nothing) :: IO (Either SomeException Bool)
+  case r of
+    Right True -> do
+      putStrLn "Refreshed consul session"
+      return True
+    _ ->
+      return False
 
 --this is a blocking method and won't return until it has acquired a consul lock
-acquireLock :: ConsulConfig -> IO (ConsulClient, Session)
+acquireLock :: ConsulConfig -> IO Session
 acquireLock config = do
   c <- initConsul config
-  session' <- createSession c sr Nothing
+  session' <- try(createSession c sr Nothing) :: IO (Either SomeException (Maybe Session))
   case session' of
-    Just session -> do
-      gotLock <- putKeyAcquireLock c lockKey session Nothing
-      if gotLock then do
-        putStrLn "Acquired a consul lock."
-        return (c, session)
-      else do
-        destroySession c session Nothing
-        putStrLn "Couldn't get a consul lock, retrying in 5 seconds."
-        sleep
-        acquireLock config
-    Nothing -> do
-      putStrLn "Error getting a consul session retrying in 5 seconds."
-      sleep
-      acquireLock config
+    Right (Just session) -> do
+      gotLock <- try(putKeyAcquireLock c lockKey session Nothing) :: IO (Either SomeException Bool)
+      case gotLock of
+        Right True -> do
+          putStrLn "Acquired a consul lock."
+          return session
+        Right False -> do
+          -- if destroying a session fails while trying to acquire the lock worked that means the connection to consul died
+          -- so still retry
+          _ <- try(destroySession c session Nothing) :: IO (Either SomeException ())
+          lockError "Couldn't get a consul lock, retrying in 5 seconds."
+        Left _ ->
+          lockError "Couldn't get a consul lock, retrying in 5 seconds."
+    _ ->
+      lockError "Couldn't get a consul session, retrying in 5 seconds."
   where
-    sr = SessionRequest{srLockDelay=Nothing, srName=Just "pidgeon", srNode=Nothing, srChecks = [], srBehavor=Nothing, srTtl=Just "90s"}
-    lockKey = KeyValuePut{kvpKey = "pidgeon-lock", kvpValue = "", kvpCasIndex=Nothing, kvpFlags=Nothing}
+    lockName = consulLockName config
+    sr = SessionRequest{srLockDelay= Just "2s", srName=Just "pidgeon", srNode=Nothing, srChecks = ["serfHealth"], srBehavor=Nothing, srTtl=Just "90s"}
+    lockKey = KeyValuePut{kvpKey = lockName, kvpValue = "", kvpCasIndex=Nothing, kvpFlags=Nothing}
     sleep = threadDelay 5000000
+    lockError errorMsg = do
+          putStrLn errorMsg
+          sleep
+          acquireLock config

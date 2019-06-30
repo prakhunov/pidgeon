@@ -15,7 +15,7 @@
 
 [consul]
     #the service name to show in the consul ui
-    serviceName = "pidgeon"
+    lockName = "pidgeon"
     #should usually be localhost since you usually want a consul agent deployed on the same server as where any app that accesses consul is hosted
     host = "localhost"
     httpPort = 8500

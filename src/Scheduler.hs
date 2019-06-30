@@ -9,7 +9,7 @@ module Scheduler
     createSchedules,
     RoutingKey,
     ExchangeName,
-    ValidatedCrontabEntry(..)
+    ValidatedCrontabEntry
   ) where
 
 
@@ -64,27 +64,33 @@ createSchedules :: [Text] -> [Either String ValidatedCrontabEntry]
 createSchedules = validateEntries . map parseCrontabEntry
 
 rabbitJob :: RabbitContext -> RoutingKey -> IO ()
-rabbitJob (RabbitContext connRef exch connTimeout) k = do
-  beforeLock <- getCurrentTime
-  conn' <- readMVar connRef
-  afterLock <- getCurrentTime
-  let timeDiffInSeconds = floor (afterLock `diffUTCTime` beforeLock) :: Int
-  if timeDiffInSeconds < connTimeout then do
-    c <- try(openChannel conn') :: IO (Either SomeException Channel)
-    -- TODO log the exception's better
-    case c of
-      Left _ ->
-        putStrLn $ "Got an error opening a channel, connection closed. Following job will run at it's next schedule: " ++ T.unpack k
-      Right chan -> do
-        r <- try(publishMsg chan exch k $ newMsg {msgBody = ""}) :: IO (Either SomeException (Maybe Int))
-        case r of
-          Left _ ->
-            putStrLn $ "Got an error trying to publish a msg. Following job will run at it's next schedule: " ++ T.unpack k
-          Right _ -> do
-            putStrLn $ "Published following cron job: " ++ T.unpack k
-            closeChannel chan
-  else
-    putStrLn $ "Took too long to get a rabbit connection not running the following job: " ++ T.unpack k
+rabbitJob (RabbitContext connRef exch connTimeout refreshConsul signalRestart) k = do
+  -- check consul lock
+  refreshedSession <- refreshConsul
+  if refreshedSession then do
+    beforeLock <- getCurrentTime
+    conn' <- readMVar connRef
+    afterLock <- getCurrentTime
+    let timeDiffInSeconds = floor (afterLock `diffUTCTime` beforeLock) :: Int
+    if timeDiffInSeconds < connTimeout then do
+      c <- try(openChannel conn') :: IO (Either SomeException Channel)
+      -- TODO log the exception's better
+      case c of
+        Left _ ->
+          putStrLn $ "Got an error opening a channel, connection closed. Following job will run at it's next schedule: " ++ T.unpack k
+        Right chan -> do
+          r <- try(publishMsg chan exch k $ newMsg {msgBody = ""}) :: IO (Either SomeException (Maybe Int))
+          case r of
+            Left _ ->
+              putStrLn $ "Got an error trying to publish a msg. Following job will run at it's next schedule: " ++ T.unpack k
+            Right _ -> do
+              putStrLn $ "Published following cron job: " ++ T.unpack k
+              closeChannel chan
+    else
+      putStrLn $ "Took too long to get a rabbit connection not running the following job: " ++ T.unpack k
+  else do
+      putMVar signalRestart ()
+      putStrLn "Not running job error refreshing the consul session."
 
 
 crontabToRabbitJob :: ValidatedCrontabEntry -> RabbitMonad Job

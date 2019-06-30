@@ -20,7 +20,7 @@ type ExchangeName = Text
 
 
 data ConsulConfig = ConsulConfig
-  { consulServiceName :: Text,
+  { consulLockName :: Text,
     consulHost :: Text,
     consulHttpPort :: PortNumber,
     consulTls :: Bool
@@ -56,7 +56,7 @@ data PidgeonConfig = PidgeonConfig
 
 consulConfigCodec :: TomlCodec ConsulConfig
 consulConfigCodec = ConsulConfig
-  <$> Toml.text "serviceName" .= consulServiceName
+  <$> Toml.text "lockName" .= consulLockName
   <*> Toml.text "host" .= consulHost
   <*> portNumberCodec "httpPort" .= consulHttpPort
   <*> Toml.bool "tls" .= consulTls
